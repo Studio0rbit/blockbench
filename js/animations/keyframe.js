@@ -2,6 +2,7 @@ import { markerColors } from "../marker_colors";
 import { clipboard } from "../native_apis";
 import { invertMolang, processMolangReturn } from "../util/molang";
 import { openMolangEditor } from "./molang_editor";
+import { applySoundFileSelection } from "./animation_audio";
 
 export class KeyframeDataPoint {
 	constructor(keyframe) {
@@ -1473,8 +1474,8 @@ Interface.definePanels(function() {
 
 							Undo.initEdit({keyframes: [keyframe]})
 							data_point.file = path;
-							if (!data_point.effect) data_point.effect = files[0].name.toLowerCase().replace(/\.[a-z]+$/, '').replace(/[^a-z0-9._]+/g, '');
-							Timeline.visualizeAudioFile(path);
+							applySoundFileSelection(data_point, files[0].name);
+							Timeline.visualizeAudioFile(path, {force: true});
 							Undo.finishEdit('Change keyframe audio file')
 						})
 					}
@@ -1509,6 +1510,10 @@ Interface.definePanels(function() {
 					let test = MolangAutocomplete.KeyframeContext.autocomplete(text, position);
 					return test;
 				},
+				toggleSyncSoundEffectName() {
+					settings.sync_sound_effect_name.set(!settings.sync_sound_effect_name.value);
+					this.$forceUpdate();
+				},
 				tl,
 				Condition
 			},
@@ -1524,6 +1529,9 @@ Interface.definePanels(function() {
 						}
 					}
 					return channel;
+				},
+				syncSoundEffectName() {
+					return settings.sync_sound_effect_name.value;
 				},
 				firstKeyframe() {
 					let data_point_length = 0;
@@ -1624,6 +1632,9 @@ Interface.definePanels(function() {
 											@input="updateInput(key, $event.target.value, data_point_i)"
 										/>
 										<input type="checkbox" v-if="key == 'locator'" :checked="data_point.bind_to_actor" title="${tl('timeline.bind_to_actor')}" @input="changeBindToActor($event, data_point_i)">
+										<div class="tool" v-if="key == 'effect' && channel == 'sound'" :class="{enabled: syncSoundEffectName}" :title="tl('timeline.sync_sound_effect_name')" @click="toggleSyncSoundEffectName()">
+											<i class="material-icons">{{ syncSoundEffectName ? 'link' : 'link_off' }}</i>
+										</div>
 										<div class="tool" v-if="key == 'effect'" :title="tl(channel == 'sound' ? 'timeline.select_sound_file' : 'timeline.select_particle_file')" @click="changeKeyframeFile(data_point, firstKeyframe)">
 											<i class="material-icons">upload_file</i>
 										</div>

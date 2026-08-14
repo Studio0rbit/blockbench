@@ -138,6 +138,7 @@ function setupSettings() {
 	}});
 	new Setting('volume', 							{category: 'preview', value: 80, min: 0, max: 200, type: 'number'});
 	new Setting('audio_scrubbing',					{category: 'preview', value: true});
+	new Setting('sync_sound_effect_name',			{category: 'preview', value: true});
 	new Setting('save_view_per_tab',				{category: 'preview', value: true});
 	new Setting('display_skin',						{category: 'preview', value: false, type: 'click', icon: 'icon-player', click: function() { changeDisplaySkin() }});
 

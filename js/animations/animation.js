@@ -4,6 +4,7 @@ import { openMolangEditor } from "./molang_editor";
 import { clipboard, currentwindow, dialog, fs, ipcRenderer } from "../native_apis";
 import { invertMolang } from "../util/molang";
 import { ScopeColors } from "../multi_file_editing";
+import { promptRelinkAnimationSounds } from "./animation_audio";
 
 export class AnimationItem {
 	constructor() {}
@@ -980,6 +981,14 @@ BARS.defineActions(function() {
 			AnimationCodec.getCodec()?.pickFile();
 		}
 	})
+	new Action('relink_animation_sounds', {
+		icon: 'queue_music',
+		category: 'animation',
+		condition: {modes: ['animate'], method: () => isApp},
+		click() {
+			promptRelinkAnimationSounds();
+		}
+	})
 	new Action('export_animation_file', {
 		icon: 'movie',
 		category: 'animation',
@@ -1702,6 +1711,7 @@ Interface.definePanels(function() {
 					'add_animation',
 					'add_animation_controller',
 					'load_animation_file',
+					'relink_animation_sounds',
 					'create_animation_group',
 					'slider_animation_length',
 					'export_modded_animations',

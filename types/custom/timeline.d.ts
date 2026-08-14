@@ -17,6 +17,8 @@ declare namespace Timeline {
 	function getAudioContext(): AudioContext
 	function stopSound(keyframe_id?: string, audio_path?: string): void
 	function disposeAllSounds(): void
+	function invalidateAudioFile(path: string): void
+	function visualizeAudioFile(path: string, options?: {force?: boolean}): Promise<number[]> | number[]
 	function getSoundEntry(keyframe_id: string, audio_path: string): any
 	function getSoundCurrentTime(entry: any): number
 	function playSound(keyframe_id: string, audio_path: string, offset?: number, options?: {

@@ -4,6 +4,7 @@ import { clipboard, currentwindow, dialog, fs, ipcRenderer } from '../native_api
 import { Filesystem } from '../file_system';
 import { Easings } from '../lib/easing';
 import { markerColors } from '../marker_colors';
+import { applySoundFileSelection } from './animation_audio';
 
 export class AnimationControllerState {
 	constructor(controller, data = 0) {
@@ -1854,8 +1855,8 @@ Interface.definePanels(() => {
 
 						Undo.initEdit({animation_controller_state: state});
 						sound_entry.file = path;
-						if (!sound_entry.effect) sound_entry.effect = files[0].name.toLowerCase().replace(/\.[a-z]+$/, '').replace(/[^a-z0-9._]+/g, '');
-						Timeline.visualizeAudioFile(path);
+						applySoundFileSelection(sound_entry, files[0].name);
+						Timeline.visualizeAudioFile(path, {force: true});
 						Undo.finishEdit('Change animation controller audio file')
 					})
 				},

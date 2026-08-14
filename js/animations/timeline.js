@@ -1,5 +1,6 @@
 import { markerColors } from "../marker_colors";
 import { dragHelper } from "../util/drag_helper";
+import { fs } from "../native_apis";
 
 export class TimelineMarker {
 	constructor(data) {
@@ -795,7 +796,21 @@ export const Timeline = {
 
 	waveforms: {},
 	waveform_sample_rate: 60,
-	async visualizeAudioFile(path) {
+	/**
+	 * Drop cached preview audio for a path so the next load reads fresh bytes from disk.
+	 */
+	invalidateAudioFile(path) {
+		if (!path) return;
+		Timeline.stopSound(undefined, path);
+		let waveform = Timeline.waveforms[path];
+		if (!waveform) return;
+		waveform.buffer = null;
+		waveform.duration = 0;
+		waveform.loading = false;
+		if (waveform.samples?.length) waveform.samples.splice(0, waveform.samples.length);
+	},
+	async visualizeAudioFile(path, options = {}) {
+		if (!path) return [];
 
 		if (!Timeline.waveforms[path]) {
 			Timeline.waveforms[path] = {
@@ -806,7 +821,10 @@ export const Timeline = {
 			};
 		}
 		let waveform = Timeline.waveforms[path];
-		if (waveform.buffer && waveform.samples.length) {
+		if (options.force) {
+			Timeline.invalidateAudioFile(path);
+		}
+		if (waveform.buffer && waveform.samples.length && !options.force) {
 			return waveform.samples;
 		}
 		if (waveform.loading) return waveform.samples;
@@ -815,8 +833,14 @@ export const Timeline = {
 
 		try {
 			let audioContext = Timeline.getAudioContext();
-			let response = await fetch(path);
-			let arrayBuffer = await response.arrayBuffer();
+			let arrayBuffer;
+			if (isApp && typeof path === 'string' && !path.startsWith('blob:')) {
+				let node_buffer = fs.readFileSync(path);
+				arrayBuffer = node_buffer.buffer.slice(node_buffer.byteOffset, node_buffer.byteOffset + node_buffer.byteLength);
+			} else {
+				let response = await fetch(path);
+				arrayBuffer = await response.arrayBuffer();
+			}
 			// decodeAudioData detaches the buffer; copy so retries remain possible if needed
 			let audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
 			let data_array = audioBuffer.getChannelData(0);
@@ -836,7 +860,7 @@ export const Timeline = {
 			}
 
 			// Normalize
-			let max = Math.max(...samples);
+			let max = Math.max(...samples) || 1;
 			samples.forEach((v, i) => samples[i] = v / max);
 			
 			Timeline.vue.$forceUpdate();
