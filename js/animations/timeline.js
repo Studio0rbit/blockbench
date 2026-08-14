@@ -76,8 +76,9 @@ TimelineMarker.prototype.menu = new Menu([
 export const Timeline = {
 	animators: [],
 	selected: Keyframe.selected,//frames
+	/** Active Web Audio preview voices (not HTMLAudioElement / WebMediaPlayer). */
 	playing_sounds: [],
-	paused_sounds: [],
+	audio_context: null,
 	playback_speed: 100,
 	time: 0,
 	get second() {return Timeline.time},
@@ -246,59 +247,109 @@ export const Timeline = {
 		}
 		Timeline.revealTime(seconds)
 	},
-	/**
-	 * Reuse a pooled HTMLAudioElement for a sound keyframe, or create one.
-	 * Does not touch animation/keyframe data — only preview playback elements.
-	 */
-	acquireSound(keyframe_id, audio_path) {
-		let media = Timeline.playing_sounds.find(sound => sound.keyframe_id == keyframe_id && sound.audio_path == audio_path);
-		if (media) {
-			Timeline.playing_sounds.remove(media);
-		} else {
-			media = Timeline.paused_sounds.find(sound => sound.keyframe_id == keyframe_id && sound.audio_path == audio_path);
-			if (media) {
-				Timeline.paused_sounds.remove(media);
-			} else {
-				media = new Audio(audio_path);
-			}
+	getAudioContext() {
+		if (!Timeline.audio_context || Timeline.audio_context.state === 'closed') {
+			Timeline.audio_context = new AudioContext();
 		}
-		if (media.stutter_timeout) {
-			clearTimeout(media.stutter_timeout);
-			delete media.stutter_timeout;
-		}
-		media.keyframe_id = keyframe_id;
-		media.audio_path = audio_path;
-		return media;
+		return Timeline.audio_context;
 	},
 	/**
-	 * Release the native WebMediaPlayer for a preview sound without affecting keyframe files.
+	 * Stop one or all Web Audio preview voices. Does not touch keyframe file data.
 	 */
-	disposeSound(media) {
-		if (!media) return;
-		if (media.stutter_timeout) {
-			clearTimeout(media.stutter_timeout);
-			delete media.stutter_timeout;
-		}
-		media.onended = null;
-		if (!media.paused) {
-			media.pause();
-		}
-		media.removeAttribute('src');
-		media.load();
-		Timeline.playing_sounds.remove(media);
-		Timeline.paused_sounds.remove(media);
+	stopSound(keyframe_id, audio_path) {
+		Timeline.playing_sounds.slice().forEach(entry => {
+			if (keyframe_id != null && entry.keyframe_id != keyframe_id) return;
+			if (audio_path != null && entry.audio_path != audio_path) return;
+			if (entry.stutter_timeout) {
+				clearTimeout(entry.stutter_timeout);
+				delete entry.stutter_timeout;
+			}
+			try {
+				entry.source.onended = null;
+				entry.source.stop();
+			} catch (err) {}
+			try {
+				entry.source.disconnect();
+				entry.gain.disconnect();
+			} catch (err) {}
+			Timeline.playing_sounds.remove(entry);
+		});
 	},
 	disposeAllSounds() {
-		[...Timeline.playing_sounds, ...Timeline.paused_sounds].forEach(media => {
-			Timeline.disposeSound(media);
-		});
-		Timeline.playing_sounds.empty();
-		Timeline.paused_sounds.empty();
+		Timeline.stopSound();
 	},
-	parkSound(media) {
-		if (!media) return;
-		Timeline.playing_sounds.remove(media);
-		Timeline.paused_sounds.safePush(media);
+	getSoundEntry(keyframe_id, audio_path) {
+		return Timeline.playing_sounds.find(entry => entry.keyframe_id == keyframe_id && entry.audio_path == audio_path);
+	},
+	getSoundCurrentTime(entry) {
+		if (!entry) return 0;
+		let ctx = Timeline.getAudioContext();
+		return entry.start_offset + (ctx.currentTime - entry.started_at) * entry.rate;
+	},
+	/**
+	 * Play a preview sound via Web Audio using a cached AudioBuffer.
+	 * Avoids HTMLAudioElement / Chromium WebMediaPlayer limits entirely.
+	 */
+	playSound(keyframe_id, audio_path, offset = 0, options = {}) {
+		let waveform = Timeline.waveforms[audio_path];
+		if (!audio_path || !waveform?.buffer) {
+			if (audio_path && !waveform?.loading) {
+				Timeline.visualizeAudioFile(audio_path);
+			}
+			return null;
+		}
+		Timeline.stopSound(keyframe_id, audio_path);
+
+		let ctx = Timeline.getAudioContext();
+		if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+		let rate = Math.clamp(options.rate ?? (Timeline.playback_speed/100), 0.1, 4.0);
+		let volume = Math.clamp(options.volume ?? (settings.volume.value/100), 0, 1);
+		let start_offset = Math.clamp(offset, 0, Math.max(waveform.buffer.duration - 0.001, 0));
+
+		let source = ctx.createBufferSource();
+		source.buffer = waveform.buffer;
+		source.playbackRate.value = rate;
+
+		let gain = ctx.createGain();
+		gain.gain.value = volume;
+		source.connect(gain);
+		gain.connect(ctx.destination);
+
+		let entry = {
+			keyframe_id,
+			audio_path,
+			source,
+			gain,
+			started_at: ctx.currentTime,
+			start_offset,
+			rate,
+			duration: waveform.buffer.duration,
+		};
+		source.onended = () => {
+			if (entry.stutter_timeout) {
+				clearTimeout(entry.stutter_timeout);
+				delete entry.stutter_timeout;
+			}
+			Timeline.playing_sounds.remove(entry);
+			try {
+				source.disconnect();
+				gain.disconnect();
+			} catch (err) {}
+		};
+		try {
+			source.start(0, start_offset);
+		} catch (err) {
+			return null;
+		}
+		Timeline.playing_sounds.push(entry);
+
+		if (options.max_duration) {
+			entry.stutter_timeout = setTimeout(() => {
+				Timeline.stopSound(keyframe_id, audio_path);
+			}, options.max_duration);
+		}
+		return entry;
 	},
 	playAudioStutter() {
 		if (!settings.audio_scrubbing.value) return;
@@ -310,31 +361,15 @@ export const Timeline = {
 				var diff = kf.time - effect_animator.animation.time;
 				if (diff < 0 && Timeline.waveforms[kf.data_points[0].file] && Timeline.waveforms[kf.data_points[0].file].duration > -diff) {
 					let audio_path = kf.data_points[0].file;
-					// Already in full playback — don't spawn another player for scrub preview
-					if (Timeline.playing_sounds.find(sound => sound.keyframe_id == kf.uuid && sound.audio_path == audio_path)) {
+					let existing = Timeline.getSoundEntry(kf.uuid, audio_path);
+					// Already in full playback — don't interrupt with scrub preview
+					if (existing && !existing.stutter_timeout) {
 						return;
 					}
-					let media = Timeline.paused_sounds.find(sound => sound.keyframe_id == kf.uuid && audio_path == sound.audio_path);
-					if (!media) {
-						media = new Audio(audio_path);
-						media.keyframe_id = kf.uuid;
-						media.audio_path = audio_path;
-						Timeline.paused_sounds.safePush(media);
-					}
-					if (media.stutter_timeout) {
-						clearTimeout(media.stutter_timeout);
-					}
-					media.playbackRate = Math.clamp(Timeline.playback_speed/100, 0.1, 4.0);
-					media.volume = Math.clamp(settings.volume.value/100, 0, 1);
-					media.currentTime = -diff;
-					media.keyframe_id = kf.uuid;
-					media.audio_path = audio_path;
-
-					if (media.paused) media.play().catch(() => {});
-					media.stutter_timeout = setTimeout(() => {
-						media.pause();
-						delete media.stutter_timeout;
-					}, 60)
+					Timeline.playSound(kf.uuid, audio_path, -diff, {
+						rate: Timeline.playback_speed/100,
+						max_duration: 60,
+					});
 				} 
 			}
 		})
@@ -754,12 +789,7 @@ export const Timeline = {
 		Animator.preview();
 		Timeline.playing = false;
 		BarItems.play_animation.setIcon('play_arrow')
-		Timeline.playing_sounds.slice().forEach(media => {
-			if (!media.paused) {
-				media.pause();
-			}
-			Timeline.parkSound(media);
-		})
+		Timeline.disposeAllSounds();
 		Blockbench.dispatchEvent('timeline_pause', {});
 	},
 
@@ -770,35 +800,51 @@ export const Timeline = {
 		if (!Timeline.waveforms[path]) {
 			Timeline.waveforms[path] = {
 				samples: [],
-				duration: 0
+				duration: 0,
+				buffer: null,
+				loading: false,
 			};
 		}
-		let {samples} = Timeline.waveforms[path];
-
-		let audioContext = new AudioContext()
-		let response = await fetch(path);
-		let arrayBuffer = await response.arrayBuffer();
-		let audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-		let data_array = audioBuffer.getChannelData(0);
-
-		Timeline.waveforms[path].duration = audioBuffer.duration;
-		
-		// Sample
-		let sample_count = Math.ceil(audioBuffer.duration * Timeline.waveform_sample_rate);
-		samples.splice(0, samples.length);
-		for (var i = 0; i < sample_count; i++) {
-			samples.push(0);
+		let waveform = Timeline.waveforms[path];
+		if (waveform.buffer && waveform.samples.length) {
+			return waveform.samples;
 		}
-		for (var i = 0; i < data_array.length; i++) {
-			let sample_index = Math.floor((i / data_array.length) * sample_count);
-			samples[sample_index] += Math.abs(data_array[i]);
-		}
+		if (waveform.loading) return waveform.samples;
+		waveform.loading = true;
+		let {samples} = waveform;
 
-		// Normalize
-		let max = Math.max(...samples);
-		samples.forEach((v, i) => samples[i] = v / max);
-		
-		Timeline.vue.$forceUpdate();
+		try {
+			let audioContext = Timeline.getAudioContext();
+			let response = await fetch(path);
+			let arrayBuffer = await response.arrayBuffer();
+			// decodeAudioData detaches the buffer; copy so retries remain possible if needed
+			let audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+			let data_array = audioBuffer.getChannelData(0);
+
+			waveform.buffer = audioBuffer;
+			waveform.duration = audioBuffer.duration;
+			
+			// Sample
+			let sample_count = Math.ceil(audioBuffer.duration * Timeline.waveform_sample_rate);
+			samples.splice(0, samples.length);
+			for (var i = 0; i < sample_count; i++) {
+				samples.push(0);
+			}
+			for (var i = 0; i < data_array.length; i++) {
+				let sample_index = Math.floor((i / data_array.length) * sample_count);
+				samples[sample_index] += Math.abs(data_array[i]);
+			}
+
+			// Normalize
+			let max = Math.max(...samples);
+			samples.forEach((v, i) => samples[i] = v / max);
+			
+			Timeline.vue.$forceUpdate();
+		} catch (err) {
+			console.warn('Failed to load animation audio', path, err);
+		} finally {
+			waveform.loading = false;
+		}
 
 		return samples;
 	},

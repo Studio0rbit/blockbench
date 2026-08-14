@@ -245,10 +245,16 @@ export class AnimationControllerState {
 	}
 	unselect() {
 		Animator.MolangParser.parse(this.on_exit);
-		this.playing_sounds.forEach(media => {
-			if (!media.paused) {
-				media.pause();
-			}
+		this.playing_sounds.slice().forEach(entry => {
+			try {
+				entry.source.onended = null;
+				entry.source.stop();
+			} catch (err) {}
+			try {
+				entry.source.disconnect();
+				entry.gain.disconnect();
+			} catch (err) {}
+			Timeline.playing_sounds.remove(entry);
 		})
 		this.playing_sounds.empty();
 	}
@@ -256,13 +262,16 @@ export class AnimationControllerState {
 		if (!this.muted.sound) {
 			this.sounds.forEach(sound => {
 				if (sound.file && !sound.cooldown) {
-					var media = new Audio(sound.file);
-					media.playbackRate = Math.clamp(AnimationController.playback_speed/100, 0.1, 4.0);
-					media.volume = Math.clamp(settings.volume.value/100, 0, 1);
-					media.play().catch(() => {});
-					this.playing_sounds.push(media);
-					media.onended = () => {
-						this.playing_sounds.remove(media);
+					let entry = Timeline.playSound(sound.uuid || sound.effect || sound.file, sound.file, 0, {
+						rate: AnimationController.playback_speed/100,
+					});
+					if (entry) {
+						this.playing_sounds.safePush(entry);
+						let previous_onended = entry.source.onended;
+						entry.source.onended = () => {
+							if (typeof previous_onended === 'function') previous_onended();
+							this.playing_sounds.remove(entry);
+						}
 					}
 
 					sound.cooldown = true;
@@ -1846,6 +1855,7 @@ Interface.definePanels(() => {
 						Undo.initEdit({animation_controller_state: state});
 						sound_entry.file = path;
 						if (!sound_entry.effect) sound_entry.effect = files[0].name.toLowerCase().replace(/\.[a-z]+$/, '').replace(/[^a-z0-9._]+/g, '');
+						Timeline.visualizeAudioFile(path);
 						Undo.finishEdit('Change animation controller audio file')
 					})
 				},

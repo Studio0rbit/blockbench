@@ -2,12 +2,28 @@
 declare namespace Timeline {
 	const animators: GeneralAnimator[]
 	const selected: _Keyframe[]
-	const playing_sounds: HTMLAudioElement[]
-	const paused_sounds: HTMLAudioElement[]
-	function acquireSound(keyframe_id: string, audio_path: string): HTMLAudioElement
-	function disposeSound(media: HTMLAudioElement): void
+	const playing_sounds: Array<{
+		keyframe_id: string
+		audio_path: string
+		source: AudioBufferSourceNode
+		gain: GainNode
+		started_at: number
+		start_offset: number
+		rate: number
+		duration: number
+		stutter_timeout?: any
+	}>
+	let audio_context: AudioContext | null
+	function getAudioContext(): AudioContext
+	function stopSound(keyframe_id?: string, audio_path?: string): void
 	function disposeAllSounds(): void
-	function parkSound(media: HTMLAudioElement): void
+	function getSoundEntry(keyframe_id: string, audio_path: string): any
+	function getSoundCurrentTime(entry: any): number
+	function playSound(keyframe_id: string, audio_path: string, offset?: number, options?: {
+		rate?: number
+		volume?: number
+		max_duration?: number
+	}): any
 	let playback_speed: number
 	/**
 	 * Current time
@@ -34,7 +50,7 @@ declare namespace Timeline {
 	function setTimecode(time: number): void
 	/**
 	 * Converts the input time to a time that is snapped to the current timeline snapping setting
-	 * @param time Input time in seconds
+	 * @param time Time in seconds
 	 * @param animation Animation to use the snapping setting from. If unspecified, uses the selected animation
 	 */
 	function snapTime(time: number, animation?: _Animation): number

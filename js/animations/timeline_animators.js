@@ -1014,30 +1014,25 @@ export class EffectAnimator extends GeneralAnimator {
 				if (diff < 0) return;
 
 				let audio_path = kf.data_points[0].file;
-				let media = Timeline.playing_sounds.find(s => s.keyframe_id == kf.uuid && s.audio_path == audio_path);
-				if (diff >= 0 && diff < (1/30) * (Timeline.playback_speed/100) && !media) {
+				let entry = audio_path && Timeline.getSoundEntry(kf.uuid, audio_path);
+				if (diff >= 0 && diff < (1/30) * (Timeline.playback_speed/100) && !entry) {
 					if (audio_path && !kf.cooldown) {
-						media = Timeline.acquireSound(kf.uuid, audio_path);
-						media.playbackRate = Math.clamp(Timeline.playback_speed/100, 0.1, 4.0);
-						media.volume = Math.clamp(settings.volume.value/100, 0, 1);
-						media.currentTime = 0;
-						media.play().catch(() => {});
-						Timeline.playing_sounds.push(media);
-						media.onended = function() {
-							Timeline.parkSound(media);
-						}
+						Timeline.playSound(kf.uuid, audio_path, 0, {
+							rate: Timeline.playback_speed/100,
+						});
 
 						kf.cooldown = true;
 						setTimeout(() => {
 							delete kf.cooldown;
 						}, 400)
 					} 
-				} else if (diff > 0 && media) {
-					if (Math.abs(media.currentTime - diff) > 0.18 && diff < media.duration) {
+				} else if (diff > 0 && entry) {
+					let current = Timeline.getSoundCurrentTime(entry);
+					if (Math.abs(current - diff) > 0.18 && diff < entry.duration) {
 						console.log('Resyncing sound')
-						// Resync
-						media.currentTime = Math.clamp(diff + 0.08, 0, media.duration);
-						media.playbackRate = Math.clamp(Timeline.playback_speed/100, 0.1, 4.0);
+						Timeline.playSound(kf.uuid, audio_path, Math.clamp(diff + 0.08, 0, entry.duration), {
+							rate: Timeline.playback_speed/100,
+						});
 					}
 				}
 			})
@@ -1110,15 +1105,9 @@ export class EffectAnimator extends GeneralAnimator {
 				if (audio_path && !kf.cooldown) {
 					var diff = kf.time - this.animation.time;
 					if (diff < 0 && Timeline.waveforms[audio_path] && Timeline.waveforms[audio_path].duration > -diff) {
-						var media = Timeline.acquireSound(kf.uuid, audio_path);
-						media.playbackRate = Math.clamp(Timeline.playback_speed/100, 0.1, 4.0);
-						media.volume = Math.clamp(settings.volume.value/100, 0, 1);
-						media.currentTime = -diff;
-						media.play().catch(() => {});
-						Timeline.playing_sounds.push(media);
-						media.onended = function() {
-							Timeline.parkSound(media);
-						}
+						Timeline.playSound(kf.uuid, audio_path, -diff, {
+							rate: Timeline.playback_speed/100,
+						});
 
 						kf.cooldown = true;
 						setTimeout(() => {

@@ -47,7 +47,7 @@ declare class AnimationControllerState {
 		sound: boolean
 		particle: boolean
 	}
-	playing_sounds: HTMLAudioElement[]
+	playing_sounds: any[]
 	animations: StateAnimation[]
 	transitions: any[]
 	sounds: any[]
