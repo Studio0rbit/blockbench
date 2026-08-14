@@ -2,7 +2,12 @@
 declare namespace Timeline {
 	const animators: GeneralAnimator[]
 	const selected: _Keyframe[]
-	const playing_sounds: any[]
+	const playing_sounds: HTMLAudioElement[]
+	const paused_sounds: HTMLAudioElement[]
+	function acquireSound(keyframe_id: string, audio_path: string): HTMLAudioElement
+	function disposeSound(media: HTMLAudioElement): void
+	function disposeAllSounds(): void
+	function parkSound(media: HTMLAudioElement): void
 	let playback_speed: number
 	/**
 	 * Current time

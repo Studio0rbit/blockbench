@@ -1013,18 +1013,18 @@ export class EffectAnimator extends GeneralAnimator {
 				let diff = this.animation.time - kf.time;
 				if (diff < 0) return;
 
-				let media = Timeline.playing_sounds.find(s => s.keyframe_id == kf.uuid);
+				let audio_path = kf.data_points[0].file;
+				let media = Timeline.playing_sounds.find(s => s.keyframe_id == kf.uuid && s.audio_path == audio_path);
 				if (diff >= 0 && diff < (1/30) * (Timeline.playback_speed/100) && !media) {
-					if (kf.data_points[0].file && !kf.cooldown) {
-						media = new Audio(kf.data_points[0].file);
-						media.keyframe_id = kf.uuid;
+					if (audio_path && !kf.cooldown) {
+						media = Timeline.acquireSound(kf.uuid, audio_path);
 						media.playbackRate = Math.clamp(Timeline.playback_speed/100, 0.1, 4.0);
 						media.volume = Math.clamp(settings.volume.value/100, 0, 1);
+						media.currentTime = 0;
 						media.play().catch(() => {});
 						Timeline.playing_sounds.push(media);
 						media.onended = function() {
-							Timeline.playing_sounds.remove(media);
-							Timeline.paused_sounds.safePush(media);
+							Timeline.parkSound(media);
 						}
 
 						kf.cooldown = true;
@@ -1106,19 +1106,18 @@ export class EffectAnimator extends GeneralAnimator {
 	startPreviousSounds() {
 		if (!this.muted.sound) {
 			this.sound.forEach(kf => {
-				if (kf.data_points[0].file && !kf.cooldown) {
+				let audio_path = kf.data_points[0].file;
+				if (audio_path && !kf.cooldown) {
 					var diff = kf.time - this.animation.time;
-					if (diff < 0 && Timeline.waveforms[kf.data_points[0].file] && Timeline.waveforms[kf.data_points[0].file].duration > -diff) {
-						var media = new Audio(kf.data_points[0].file);
+					if (diff < 0 && Timeline.waveforms[audio_path] && Timeline.waveforms[audio_path].duration > -diff) {
+						var media = Timeline.acquireSound(kf.uuid, audio_path);
 						media.playbackRate = Math.clamp(Timeline.playback_speed/100, 0.1, 4.0);
 						media.volume = Math.clamp(settings.volume.value/100, 0, 1);
 						media.currentTime = -diff;
-						media.keyframe_id = kf.uuid;
 						media.play().catch(() => {});
 						Timeline.playing_sounds.push(media);
 						media.onended = function() {
-							Timeline.playing_sounds.remove(media);
-							Timeline.paused_sounds.safePush(media);
+							Timeline.parkSound(media);
 						}
 
 						kf.cooldown = true;

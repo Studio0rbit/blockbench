@@ -246,6 +246,60 @@ export const Timeline = {
 		}
 		Timeline.revealTime(seconds)
 	},
+	/**
+	 * Reuse a pooled HTMLAudioElement for a sound keyframe, or create one.
+	 * Does not touch animation/keyframe data — only preview playback elements.
+	 */
+	acquireSound(keyframe_id, audio_path) {
+		let media = Timeline.playing_sounds.find(sound => sound.keyframe_id == keyframe_id && sound.audio_path == audio_path);
+		if (media) {
+			Timeline.playing_sounds.remove(media);
+		} else {
+			media = Timeline.paused_sounds.find(sound => sound.keyframe_id == keyframe_id && sound.audio_path == audio_path);
+			if (media) {
+				Timeline.paused_sounds.remove(media);
+			} else {
+				media = new Audio(audio_path);
+			}
+		}
+		if (media.stutter_timeout) {
+			clearTimeout(media.stutter_timeout);
+			delete media.stutter_timeout;
+		}
+		media.keyframe_id = keyframe_id;
+		media.audio_path = audio_path;
+		return media;
+	},
+	/**
+	 * Release the native WebMediaPlayer for a preview sound without affecting keyframe files.
+	 */
+	disposeSound(media) {
+		if (!media) return;
+		if (media.stutter_timeout) {
+			clearTimeout(media.stutter_timeout);
+			delete media.stutter_timeout;
+		}
+		media.onended = null;
+		if (!media.paused) {
+			media.pause();
+		}
+		media.removeAttribute('src');
+		media.load();
+		Timeline.playing_sounds.remove(media);
+		Timeline.paused_sounds.remove(media);
+	},
+	disposeAllSounds() {
+		[...Timeline.playing_sounds, ...Timeline.paused_sounds].forEach(media => {
+			Timeline.disposeSound(media);
+		});
+		Timeline.playing_sounds.empty();
+		Timeline.paused_sounds.empty();
+	},
+	parkSound(media) {
+		if (!media) return;
+		Timeline.playing_sounds.remove(media);
+		Timeline.paused_sounds.safePush(media);
+	},
 	playAudioStutter() {
 		if (!settings.audio_scrubbing.value) return;
 		let effect_animator = Animation.selected?.animators.effects;
@@ -256,7 +310,17 @@ export const Timeline = {
 				var diff = kf.time - effect_animator.animation.time;
 				if (diff < 0 && Timeline.waveforms[kf.data_points[0].file] && Timeline.waveforms[kf.data_points[0].file].duration > -diff) {
 					let audio_path = kf.data_points[0].file;
-					let media = Timeline.paused_sounds.find(sound => sound.keyframe_id == kf.uuid && audio_path == sound.audio_path) ?? new Audio(audio_path);
+					// Already in full playback — don't spawn another player for scrub preview
+					if (Timeline.playing_sounds.find(sound => sound.keyframe_id == kf.uuid && sound.audio_path == audio_path)) {
+						return;
+					}
+					let media = Timeline.paused_sounds.find(sound => sound.keyframe_id == kf.uuid && audio_path == sound.audio_path);
+					if (!media) {
+						media = new Audio(audio_path);
+						media.keyframe_id = kf.uuid;
+						media.audio_path = audio_path;
+						Timeline.paused_sounds.safePush(media);
+					}
 					if (media.stutter_timeout) {
 						clearTimeout(media.stutter_timeout);
 					}
@@ -623,6 +687,7 @@ export const Timeline = {
 		TickUpdates.keyframe_selection = true;
 	},
 	clear() {
+		Timeline.disposeAllSounds();
 		Timeline.animators.purge();
 		Timeline.selected.empty();
 		Timeline.vue.markers = [];
@@ -689,13 +754,12 @@ export const Timeline = {
 		Animator.preview();
 		Timeline.playing = false;
 		BarItems.play_animation.setIcon('play_arrow')
-		Timeline.playing_sounds.forEach(media => {
+		Timeline.playing_sounds.slice().forEach(media => {
 			if (!media.paused) {
 				media.pause();
 			}
+			Timeline.parkSound(media);
 		})
-		Timeline.paused_sounds.safePush(...Timeline.playing_sounds);
-		Timeline.playing_sounds.empty();
 		Blockbench.dispatchEvent('timeline_pause', {});
 	},
 
